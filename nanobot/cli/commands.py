@@ -77,6 +77,10 @@ from nanobot.cli.stream import StreamRenderer, ThinkingSpinner  # noqa: E402
 from nanobot.config.paths import get_workspace_path, is_default_workspace  # noqa: E402
 from nanobot.config.schema import Config  # noqa: E402
 from nanobot.security.network import is_loopback_host  # noqa: E402
+from nanobot.session.keys import (  # noqa: E402
+    UNIFIED_SESSION_KEY,
+    last_channel_from_metadata,
+)
 from nanobot.utils.evaluator import evaluate_response, resolve_evaluator_prompt  # noqa: E402
 from nanobot.utils.helpers import sync_workspace_templates  # noqa: E402
 from nanobot.utils.restart import (  # noqa: E402
@@ -276,12 +280,20 @@ def _pick_heartbeat_target_from_sessions(
     enabled_channels: Iterable[str],
     sessions: Iterable[dict[str, Any]],
     archived_keys: Iterable[str],
+    unified_session_metadata: dict[str, Any] | None = None,
 ) -> tuple[str, str]:
     enabled = set(enabled_channels)
     archived = set(archived_keys)
     for item in sessions:
         key = item.get("key") or ""  # 如果前面的值为真，直接返回前面的值（短路），不看后面。如果前面的值为假，返回后面的值。Python 中 0、空字符串 ""、空列表 []、None 等都被视为"假（Falsy）"，其他通常为"真（Truthy）"
         if key in archived:
+            continue
+        if key == UNIFIED_SESSION_KEY:
+            route = last_channel_from_metadata(unified_session_metadata)
+            if route is not None:
+                channel, chat_id = route
+                if channel not in {"cli", "system"} and channel in enabled:
+                    return channel, chat_id
             continue
         if ":" not in key:
             continue
@@ -1996,10 +2008,16 @@ def _run_gateway(
     def _pick_heartbeat_target() -> tuple[str, str]:
         """Pick a routable channel/chat target for heartbeat-triggered messages."""
         sidebar_state = read_webui_sidebar_state()
+        unified_metadata = None
+        if config.agents.defaults.unified_session:
+            record = session_manager.read_session_metadata(UNIFIED_SESSION_KEY)
+            if isinstance(record, dict) and isinstance(record.get("metadata"), dict):
+                unified_metadata = record["metadata"]
         return _pick_heartbeat_target_from_sessions(
             enabled_channels=channels.enabled_channels,
             sessions=session_manager.list_sessions(),
             archived_keys=sidebar_state.get("archived_keys", []),
+            unified_session_metadata=unified_metadata,
         )
 
     if channels.enabled_channels:
