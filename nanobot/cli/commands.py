@@ -35,13 +35,13 @@ _log_handler_id = logger.add(
     ),
     level="INFO",
     colorize=None,
-    filter=lambda record: record["extra"].setdefault("channel", "-") or True,
+    filter=lambda record: record["extra"].setdefault("channel", "-") or True, # lambda 代表这个一个lambda表达式，然后参数是record，record["extra"]可以看出是字典，字典类型为什么返回true啊。FilterFunction = Callable[[Record], bool] 标识这个可以接受lambda
 )
 
 
 def _set_nanobot_logs(enabled: bool) -> None:
     if enabled:
-        logger.enable("nanobot")
+        logger.enable("nanobot") # nanobot包下面都开启日志
     else:
         logger.disable("nanobot")
 
@@ -86,7 +86,11 @@ from nanobot.webui.sidebar_state import read_webui_sidebar_state  # noqa: E402
 
 def _sanitize_surrogates(text: str) -> str:
     """Reconstruct surrogate pairs into real characters; replace lone surrogates.
-
+    在 Unicode 编码体系中，大部分常用字符都可以用 16 位（2个字节）来表示。但是，像 Emoji 表情（比如 🐈）或者一些生僻汉字，超出了 16 位的表示范围。
+    为了在 UTF-16 编码中表示这些超大字符，计算机引入了代理对（Surrogate Pairs）的概念：即用两个 16 位的编码组合在一起来代表一个字符。
+    例如，猫的 Emoji 🐈（U+1F408），在 UTF-16 中是由高位代理 \ud83d 和低位代理 \udc08 组合而成的。
+   在这个过程中，Python 的 UTF-16 解码器非常聪明，它会重新审查这些字节流：
+   破镜重圆： 如果它发现前面是 \ud83d，紧接着后面跟着 \udc08，它就会恍然大悟，把这俩重新合体，完美还原成一个 🐈
     On Windows, console input may produce lone surrogate code points (e.g.
     ``\\ud83d\\udc08`` for U+1F408).  Round-tripping through UTF-16 reconstructs
     paired surrogates into their actual characters and replaces unpaired ones
@@ -191,18 +195,17 @@ class SafeFileHistory(FileHistory):
     def store_string(self, string: str) -> None:
         super().store_string(_sanitize_surrogates(string))
 
-
 app = typer.Typer(
     name="nanobot",
-    context_settings={"help_option_names": ["-h", "--help"]},
+    context_settings={"help_option_names": ["-h", "--help"]},  # 字典的value是数组
     help=f"{__logo__} nanobot - Personal AI Assistant",
     no_args_is_help=True,
 )
 
 console = Console()
-EXIT_COMMANDS = {"exit", "quit", "/exit", "/quit", ":q"}
-_REASONING_SENTENCE_ENDINGS = (".", "!", "?", "。", "！", "？")
-_REASONING_FLUSH_CHARS = 60
+EXIT_COMMANDS = {"exit", "quit", "/exit", "/quit", ":q"}  # 退出命令
+_REASONING_SENTENCE_ENDINGS = (".", "!", "?", "。", "！", "？")  # 推理内容缓冲器，用于控制何时把流式接收的推理文本显示给用户
+_REASONING_FLUSH_CHARS = 60  # 60个字符刷新，用于控制何时把流式接收的推理文本显示给用户
 
 _HEARTBEAT_PREAMBLE = (
     "[Your response will be delivered directly to the user's messaging app. "
@@ -214,10 +217,13 @@ _HEARTBEAT_PREAMBLE = (
 
 
 def _heartbeat_has_active_tasks(content: str) -> bool:
-    """True if HEARTBEAT.md has task lines, ignoring headers, blanks and comments."""
+    """True if HEARTBEAT.md has task lines, ignoring headers, blanks and comments.
+
+    任务清单必须包含 active tasks 这个关键字。但是忽略注释里面的，忽略空白内容和标题里面的。
+    """
     in_comment = False
     in_active_section: bool = False
-    for line in content.splitlines():
+    for line in content.splitlines():  # 按照行分割
         stripped = line.strip()
         if in_comment:
             if "-->" in stripped:
@@ -239,7 +245,7 @@ def _heartbeat_has_active_tasks(content: str) -> bool:
 
 
 def _pick_heartbeat_target_from_sessions(
-    *,
+    *,  # * 表示其后的参数必须以关键字参数形式传递
     enabled_channels: Iterable[str],
     sessions: Iterable[dict[str, Any]],
     archived_keys: Iterable[str],
@@ -247,7 +253,7 @@ def _pick_heartbeat_target_from_sessions(
     enabled = set(enabled_channels)
     archived = set(archived_keys)
     for item in sessions:
-        key = item.get("key") or ""
+        key = item.get("key") or ""  # 如果前面的值为真，直接返回前面的值（短路），不看后面。如果前面的值为假，返回后面的值。Python 中 0、空字符串 ""、空列表 []、None 等都被视为"假（Falsy）"，其他通常为"真（Truthy）"
         if key in archived:
             continue
         if ":" not in key:
@@ -2519,6 +2525,6 @@ def _login_github_copilot() -> None:
         console.print(f"[red]Authentication error: {e}[/red]")
         raise typer.Exit(1)
 
-
+#你在另一个文件里写了一句 import commands。Python 会立刻去把 commands.py 从头到尾再执行一遍（包括第 194 行的创建对象）。但当它执行到最后一行时，因为是被 import 的，系统分配的 __name__ 变量不再是 "__main__"，条件不成立，app() 就被跳过了。app() 就是魔术方法__call__，可以理解为：app.__call__();
 if __name__ == "__main__":
     app()

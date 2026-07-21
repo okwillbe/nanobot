@@ -143,6 +143,7 @@ dev = [
     "msgpack>=1.1.0,<2.0.0",
 ]
 
+# 程序入口  冒号后面 app → 该模块中的一个可调用对象（通常是函数、类实例等）。运行这个对象也是调用他的魔术方法。所以nanobot这个命令等同于python nanobot/cli/commands.py
 [project.scripts]
 nanobot = "nanobot.cli.commands:app"
 

@@ -1495,9 +1495,9 @@ def test_heartbeat_retains_recent_messages_by_default():
     "content, expected",
     [
         ("", False),
-        ("# Title\n\n## Active Tasks\n", False),
+        ("# Title\n\n## Active Tasks\n", False), # 这个没有实质内容所所以为false
         ("<!--\nmulti-line\ncomment\n-->\n", False),  # block comment, not tasks
-        ("<!-- single line -->\n", False),
+        ("<!-- single line -->\n", False), # 注释里面的也不算
         ("## Active Tasks\n\n- water the plants\n", True),
         ("## Active Tasks\n\n### Garden\n\n- water the plants\n", True),
         ("## Notes\n\nsome random note\n", False),
