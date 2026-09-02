@@ -109,21 +109,17 @@ from nanobot.webui.sidebar_state import read_webui_sidebar_state  # noqa: E402
 
 
 def _sanitize_surrogates(text: str) -> str:
-    """Reconstruct surrogate pairs into real characters; replace lone surrogates.
-    在 Unicode 编码体系中，大部分常用字符都可以用 16 位（2个字节）来表示。但是，像 Emoji 表情（比如 🐈）或者一些生僻汉字，超出了 16 位的表示范围。
-    为了在 UTF-16 编码中表示这些超大字符，计算机引入了代理对（Surrogate Pairs）的概念：即用两个 16 位的编码组合在一起来代表一个字符。
-    例如，猫的 Emoji 🐈（U+1F408），在 UTF-16 中是由高位代理 \ud83d 和低位代理 \udc08 组合而成的。
-   在这个过程中，Python 的 UTF-16 解码器非常聪明，它会重新审查这些字节流：
-   破镜重圆： 如果它发现前面是 \ud83d，紧接着后面跟着 \udc08，它就会恍然大悟，把这俩重新合体，完美还原成一个 🐈
-    On Windows, console input may produce lone surrogate code points (e.g.
-    ``\\ud83d\\udc08`` for U+1F408).  Round-tripping through UTF-16 reconstructs
-    paired surrogates into their actual characters and replaces unpaired ones
-    with U+FFFD.
+    """修复 Windows 控制台下输入 Emoji 等特殊字符可能会乱码的问题。
+
+    在 Windows 命令行里，有时候输入像 Emoji 这样的复杂字符，它们会被拆分成两半（也就是代理对）。
+    这个函数利用 UTF-16 的编码再解码机制，把被拆开的两半重新拼回到一起，还原成原本的字符。
+    如果遇到落单拼不回去的部分，就直接换成一个占位符，防止程序报错。
     """
     return text.encode("utf-16-le", errors="surrogatepass").decode("utf-16-le", errors="replace")
 
 
 def _signal_name(signum: int) -> str:
+    """当代码执行到 return f"signal {signum}" 这一句时，说明在尝试执行 signal.Signals(signum).name 的时候发生了 ValueError 并被 suppress 拦截了 """
     with suppress(ValueError):
         return signal.Signals(signum).name
     return f"signal {signum}"
@@ -133,39 +129,70 @@ def _ensure_interactive_tty_mode() -> None:
     """Restore interactive line input after a raw-mode TTY leak."""
     try:
         fd = sys.stdin.fileno()
-        if not os.isatty(fd):
+        if not os.isatty(fd): # 运行在非交互模式（管道 | 或重定向 > 灌入的数据）
             return
-    except Exception:
+    except Exception: # 这里只保证上面代码不会异常报错
         return
 
-    with suppress(Exception):
-        import termios
+    with suppress(Exception): # 忽略下方代码的所有异常（如果在 Windows 下运行，没有 termios 模块，直接忽略即可）
+        import termios # 导入 Unix/Linux 下操作终端底层属性的库
 
+        # attrs 是一个包含控制台各种底层配置的数组，包含：输入模式、输出模式、控制模式、本地模式等 获取到实际的值，当前程序命令行的属性设置
         attrs = termios.tcgetattr(fd)
+
+        # ------------------- 步骤1：定义“正常模式”应该长什么样 -------------------
+
+        # 定义必须开启的属性 (lflag：本地模式) 是定义的值，要着三个功能都开启的掩码
+        # ISIG:   允许接收信号（让你按 Ctrl+C 能停止程序）
+        # ICANON: 启用规范模式（让你能按行输入，能使用退格键修改，按回车才提交给程序）
+        # ECHO:   启用回显（让你敲键盘时，屏幕上能显示出你敲的字）
         required_lflag = termios.ISIG | termios.ICANON | termios.ECHO
+        
+        # 定义必须关闭的属性 (iflag：输入模式)
+        # IGNCR: 忽略回车符 (\r)
+        # INLCR: 把回车符 (\r) 转换成换行符 (\n)
+        # getattr 是为了兼容某些系统中可能不存在这两个常量的情况
         blocked_input_flags = getattr(termios, "IGNCR", 0) | getattr(termios, "INLCR", 0)
+
+        # ------------------- 步骤2：检查当前是不是“正常模式” -------------------
+
         if (
+            # 检查：Ctrl+C、退格键、敲字回显 是否都正常？(attrs[3] 对应 lflag)
             (attrs[3] & required_lflag) == required_lflag
+            # 检查：是否开启了“把回车转换为换行” (ICRNL)？(attrs[0] 对应 iflag)
             and attrs[0] & termios.ICRNL
+            # 检查：是否没有开启那两个应该被屏蔽的“坏属性”？
             and not attrs[0] & blocked_input_flags
         ):
-            return
+            return # 如果全部符合，说明终端很正常，什么都不用做，直接返回！
+
+        # ------------------- 步骤3：强行修复终端 -------------------
+
+        # 修复输入模式：强行开启 ICRNL (回车转换行)，并用 ~ 操作符强行剔除那些被拉黑的属性
         attrs[0] = (attrs[0] | termios.ICRNL) & ~blocked_input_flags
+        
+        # 修复本地模式：强行开启 Ctrl+C、行输入、字符回显
         attrs[3] |= required_lflag
+        
+        # TCSANOW 意思是：立刻（NOW）把修改好的配置强制写回到终端 (fd) 中！
         termios.tcsetattr(fd, termios.TCSANOW, attrs)
+        
+        # 擦屁股：清空当前输入缓冲区 (TCIFLUSH)。因为刚才终端混乱期间，用户可能瞎敲了一些没用的字符，统统丢弃掉
         termios.tcflush(fd, termios.TCIFLUSH)
+        
+        # 记录日志，告诉你它刚刚在后台默默帮你修好了一个崩溃的终端
         logger.debug("Restored foreground gateway TTY mode")
 
 
 def _install_gateway_shutdown_handlers(
     loop: asyncio.AbstractEventLoop,
     shutdown_event: asyncio.Event,
-    tasks: list[asyncio.Task[Any]],
-    print_status: Callable[[str], None],
+    tasks: list[asyncio.Task[Any]],#Task[X] 里的 X 就代表这个任务执行完后返回的数据类型， Task[Any]，说明这个任务跑完可以返回任何类型的值，或者我们根本不在乎它返回什么。
+    print_status: Callable[[str], None], #里的 [str] 并不是指参数是一个数组（列表）。这个函数接受 1 个参数，且这个参数的类型是字符串（str）。Callable[[参数1类型, 参数2类型, ...], 返回值类型]。
 ) -> Callable[[], None]:
     """Install foreground gateway signal handlers and return a restore callback."""
     loop_signals: list[int] = []
-    previous_handlers: list[tuple[int, Any]] = []
+    previous_handlers: list[tuple[int, Any]] = [] # list[X] 这里的 X 是指列表里装的是什么东西， tuple[int, Any] 就是一个二元组，第一个元素是整数 int，第二个元素是任意类型 Any
     shutdown_requested = False
 
     def request_shutdown(signum: int) -> None:
@@ -180,7 +207,7 @@ def _install_gateway_shutdown_handlers(
         shutdown_requested = True
         logger.info("Gateway shutdown requested by {}", sig_name)
         print_status("\nShutting down... Press Ctrl+C again to force.")
-        shutdown_event.set()
+        shutdown_event.set()  #的作用是触发一个全局的关闭信号，通知主程序开始优雅退出（Graceful Shutdown）。异步场景下
 
     for signum in (signal.SIGINT, signal.SIGTERM):
         try:

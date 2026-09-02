@@ -20,21 +20,25 @@ from loguru import logger
 
 from nanobot.utils.helpers import sanitize_surrogates_deep
 
-STREAM_IDLE_TIMEOUT_ENV = "NANOBOT_STREAM_IDLE_TIMEOUT_S"
-DEFAULT_STREAM_IDLE_TIMEOUT_S = 90.0
-MAX_STREAM_IDLE_TIMEOUT_S = 3600.0
-RETRY_AFTER_BUFFER = 1
+STREAM_IDLE_TIMEOUT_ENV = "NANOBOT_STREAM_IDLE_TIMEOUT_S" #用于读取流式空闲超时配置的环境变量名
+DEFAULT_STREAM_IDLE_TIMEOUT_S = 90.0 #默认流式响应空闲超时时间（90 秒）
+MAX_STREAM_IDLE_TIMEOUT_S = 3600.0 #流式空闲超时的最大允许上限（上限保护/Clamping）
+RETRY_AFTER_BUFFER = 1 #服务端限流重试的“安全缓冲时间”
 
 
 def resolve_stream_idle_timeout_s(
-    *,
+    *, #仅限关键字参数分隔符，意味着所有参数只能通过关键字传递，不能通过位置传递
     env_value: str | None = None,
     default: float = DEFAULT_STREAM_IDLE_TIMEOUT_S,
     maximum: float = MAX_STREAM_IDLE_TIMEOUT_S,
 ) -> float:
     """Return a safe streaming idle timeout from env/config text."""
-    raw = os.environ.get(STREAM_IDLE_TIMEOUT_ENV) if env_value is None else env_value
-    if raw is None or not raw.strip():
+    raw = os.environ.get(STREAM_IDLE_TIMEOUT_ENV) if env_value is None else env_value  #三元运算符（Ternary Operator） 值A if 条件 else 值B； 如果 条件 为真，整个表达式的值就是 值A；否则，整个表达式的值就是 值B。
+    """满足你的需求：去除后不是空串时为 True 
+    if raw.strip():
+        print("有有效内容")
+    """
+    if raw is None or not raw.strip(): #raw.strip() 的作用是去除字符串 raw 首尾的所有空白字符（包括空格、制表符 \t、换行符 \n、回车符 \r 等）；not raw.strip() 标识是strip完毕是空字符串。
         return default
     try:
         value = float(raw)
@@ -55,10 +59,10 @@ class ToolCallRequest:
     """A tool call request from the LLM."""
     id: str
     name: str
-    arguments: Any
-    extra_content: dict[str, Any] | None = None
-    provider_specific_fields: dict[str, Any] | None = None
-    function_provider_specific_fields: dict[str, Any] | None = None
+    arguments: Any #工具调用的参数内容 通常是模型生成的 JSON 字符串（例如 '{"query": "python", "max_results": 5}'），也可以是解析后的字典 dict。
+    extra_content: dict[str, Any] | None = None #额外内容/思考链元数据（主要用于特殊厂商扩展） 模型的思考链签名
+    provider_specific_fields: dict[str, Any] | None = None #工具调用最外层（Tool Call 级别）的厂商自定义/非标准字段。不同的 API 网关或代理（如 OpenRouter、LiteLLM、OneAPI、自建网关等）有时会在标准的 {"id": "...", "type": "function", "function": {...}} 外层附带一些专有字段（如路由标签、计费标识、自定义 ID 等）。
+    function_provider_specific_fields: dict[str, Any] | None = None #标准 OpenAI 规范中 function 内部仅有 name 和 arguments 两个字段。
 
     def has_valid_name(self) -> bool:
         """Whether this call carries a usable (non-empty string) tool name.
@@ -70,8 +74,8 @@ class ToolCallRequest:
         ``messages.content.N.tool_use.name: Input should be a valid string``),
         which permanently wedges the session.
         """
-        runtime_name = cast(object, self.name)
-        return isinstance(runtime_name, str) and bool(runtime_name)
+        runtime_name = cast(object, self.name) #如果 self.name 原本被标注为了其他类型（例如 str、Any 或自定义类型），而接下来的代码要求传入一个 object 类型的参数，开发者用 cast(object, self.name) 来明确消除类型检查器的报警。
+        return isinstance(runtime_name, str) and bool(runtime_name) #isinstance() 是 Python 的内置函数，用于检查一个对象是否是某个指定类（或其子类）的实例
 
     def to_openai_tool_call(self) -> dict[str, Any]:
         """Serialize to an OpenAI-style tool_call payload."""
@@ -102,7 +106,8 @@ def parse_tool_arguments(arguments: Any) -> Any:
 
     Valid JSON object strings become dicts. Empty strings become no-arg calls.
     Malformed JSON and JSON array/scalar values are preserved so ToolRegistry
-    can reject them before execution.
+    can reject them before execution.新生成的工具调用（即将执行）： 使用的是 parse_tool_arguments。
+    当模型新输出的参数格式损坏时，不应该悄悄帮它修复，而应该保留错误并让工具执行器报错，以便将错误明确反馈给模型，让模型学会自我修正。
     """
     if arguments is None:
         return {}
@@ -125,7 +130,8 @@ def tool_arguments_object_for_replay(arguments: Any) -> dict[str, Any]:
 
     This compatibility path may repair malformed JSON because it only shapes
     existing conversation history for provider protocols. Do not use it for
-    newly generated tool calls that are about to execute.
+    newly generated tool calls that are about to execute.历史消息回放（已成定局的历史）： 如果历史消息中存留了轻微格式瑕疵的 JSON（例如少了引号 {path:"foo.txt"} 或格式略有损坏），直接发给 API 会触发 400 Bad Request，导致整个会话后续再也无法发送任何消息。
+因此，在将历史回放给模型时，必须有一个具备容错和自愈能力的转换函数。
     """
     if arguments is None:
         return {}
@@ -168,8 +174,8 @@ class ProviderConversationState:
     provider: str
     model: str
     version: int
-    payload: dict[str, Any] = field(default_factory=dict, repr=False)
-    pending_messages: list[dict[str, Any]] = field(default_factory=list, repr=False)
+    payload: dict[str, Any] = field(default_factory=dict, repr=False) #repr=False 可以在打印日志（repr(state)）时自动隐藏该字段，避免敏感数据泄露或污染日志。
+    pending_messages: list[dict[str, Any]] = field(default_factory=list, repr=False) #待物化/待处理的追加消息队列（Pending Messages）。
 
     def with_pending_messages(
         self,
@@ -198,7 +204,7 @@ class ProviderConversationState:
 
     @classmethod
     def from_private_record(
-        cls,
+        cls, #它的第一个参数接收的是类本身（约定命名为 cls），而不是实例对象（self）。
         value: object,
     ) -> ProviderConversationState | None:
         """Validate and deserialize a private session-sidecar value."""
@@ -222,7 +228,7 @@ class ProviderConversationState:
             or not isinstance(version, int)
             or not isinstance(payload, dict)
             or not isinstance(pending, list)
-            or any(
+            or any( #any(...)（内置真值检查函数），只要其中有任意一个元素计算为 True，any() 就会立即返回 True
                 not isinstance(message, dict)
                 for message in cast(list[object], pending)
             )
@@ -256,7 +262,7 @@ class LLMResponse:
     """Response from an LLM provider."""
     content: str | None
     tool_calls: list[ToolCallRequest] = field(default_factory=list)
-    finish_reason: str = "stop"
+    finish_reason: str = "stop" #大模型停止生成当前这段输出的原因（结束原因/停止原因）。
     usage: dict[str, int] = field(default_factory=dict)
     retry_after: float | None = None  # Provider supplied retry wait in seconds.
     reasoning_content: str | None = None  # Kimi, DeepSeek-R1, MiMo etc.

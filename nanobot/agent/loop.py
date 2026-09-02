@@ -113,7 +113,7 @@ class TurnKind(Enum):
     SYSTEM = auto()
 
 
-@dataclass
+@dataclass            #主要用于简化用于存储数据的类定义。它会根据类中声明的类型注解，自动生成常见样板代码（如构造函数、打印格式、比较逻辑等）。
 class TurnContext:
     msg: InboundMessage
     session_key: str

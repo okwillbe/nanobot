@@ -11,7 +11,7 @@ if TYPE_CHECKING:
     from nanobot.providers.factory import ProviderSnapshot
 
 
-@dataclass(frozen=True, slots=True)
+@dataclass(frozen=True, slots=True) #frozen=True：表示这个实例在创建后不能被修改（不可变），禁止修改已有字段，禁止新增字段。一旦初始化完成，属性只读。同时自动生成 __hash__() 方法。slots=True：底层通过 __slots__ 机制存储属性，移除每个实例自带的动态字典 __dict__。
 class LLMRuntime:
     """One captured provider/model configuration used for an entire execution.
 

@@ -4,7 +4,10 @@ import asyncio
 
 from nanobot.bus.events import InboundMessage, OutboundMessage
 
-
+"""
+MessageBus 并不是“一个用户一个队列”，而是全局共用的统一消息总线。
+nanobot 采用的是 “全局统一队列接收 + 后端基于 SessionKey 路由隔离并发” 的设计模式。
+"""
 class MessageBus:
     """
     Async message bus that decouples chat channels from the agent core.
@@ -33,7 +36,7 @@ class MessageBus:
         """Consume the next outbound message (blocks until available)."""
         return await self.outbound.get()
 
-    @property
+    @property #只读属性：提供获取inbound_size和outbound_size的方法，对象.inbound_size 将调用这个方法获取属性
     def inbound_size(self) -> int:
         """Number of pending inbound messages."""
         return self.inbound.qsize()
