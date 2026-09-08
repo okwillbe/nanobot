@@ -20,7 +20,7 @@ if TYPE_CHECKING:
 
 
 # Force UTF-8 encoding for Windows console
-if sys.platform == "win32":
+if sys.platform== "win32":
     if sys.stdout.encoding != "utf-8":
         os.environ["PYTHONIOENCODING"] = "utf-8"
         # Re-open stdout/stderr with UTF-8 encoding
